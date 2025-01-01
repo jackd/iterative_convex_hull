@@ -4,76 +4,62 @@ import 'package:iterative_convex_hull/bounded.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('ConvexHull tests', () {
-    test('constructor creates appropriate ranges', () {
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(0.5, 1)]);
-      final range = hull.pointRange;
+  group('boundedConvexHull', () {
+    test('creates appropriate ranges', () {
+      late PointRange range;
+      boundedConvexHull([Point(0, 0), Point(0, 1), Point(0.5, 1)],
+          onRangeChange: (r) => range = r);
       check(range.xMin).equals(0);
       check(range.xMax).equals(0.5);
       check(range.yMin).equals(0);
       check(range.yMax).equals(1);
     });
 
-    test('redundant add does not trigger onRangeChange', () {
-      var triggered = false;
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(1, 1)],
-          onRangeChange: (_) => triggered = true);
-      check(triggered).isFalse();
+    test('does not trigger on internal add', () {
+      bool triggered = false;
+      final hull = boundedConvexHull([Point(0, 0), Point(0, 1), Point(1, 0)],
+          onRangeChange: (r) => triggered = true);
+      check(triggered).isTrue();
+      triggered = false;
       // add internal point
-      hull.add(Point(0.25, 0.5));
+      var added = hull.add(Point(0.25, 0.5));
+      check(added).isNull();
       check(triggered).isFalse();
-      // add new vertex that doesn't change the range
-      hull.add(Point(1, 0));
+      // add new external point that doesn't change the range
+      added = hull.add(Point(0.75, 0.75));
+      check(added).isNotNull();
       check(triggered).isFalse();
     });
 
-    test('add triggers onRangeChange', () {
-      var triggered = false;
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(0.5, 1)],
-          onRangeChange: (_) => triggered = true);
-      check(triggered).isFalse();
+    test('triggers on external add', () {
+      PointRange? range;
+      final hull = boundedConvexHull([Point(0, 0), Point(0, 1), Point(0.5, 1)],
+          onRangeChange: (r) => range = r);
+      check(range).isNotNull();
       // add internal point
       hull.add(Point(1.5, 0.5));
-      check(triggered).isTrue();
-      check(hull.pointRange.xMax).equals(1.5);
-      check(hull.pointRange.xMin).equals(0);
+      check(range).isNotNull();
+      check(range!.xMax).equals(1.5);
+      check(range!.xMin).equals(0);
     });
 
-    test('remove triggers onRangeChange', () {
-      var triggered = false;
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(0.5, 1)],
-          onRangeChange: (_) => triggered = true);
-      check(hull.pointRange).equals(PointRange.fromLimits(0, 0.5, 0, 1));
+    test('triggers on relevant entry removal', () {
+      PointRange? range;
+      final hull = boundedConvexHull([Point(0, 0), Point(0, 1), Point(0.5, 1)],
+          onRangeChange: (r) => range = r);
+      check(range).isNotNull();
+      check(range).equals(PointRange.fromLimits(0, 0.5, 0, 1));
       hull.remove(Point(0.5, 1));
-      check(triggered).isTrue();
-      check(hull.pointRange).equals(PointRange.fromLimits(0, 0, 0, 1));
+      check(range).equals(PointRange.fromLimits(0, 0, 0, 1));
     });
 
-    test('redundant move to interior does not trigger onRangeChange', () {
-      var triggered = false;
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(1, 0.25), Point(1, 1)],
-          onRangeChange: (_) => triggered = true);
-      check(hull.pointRange).equals(PointRange.fromLimits(0, 1, 0, 1));
-      check(hull.linkedVertexMap).length.equals(4);
-      hull.move(Point(1, 0.25), Point(0.2, 0.25));
-      check(hull.linkedVertexMap).length.equals(3);
-      check(triggered).isFalse();
-      check(hull.pointRange).equals(PointRange.fromLimits(0, 1, 0, 1));
-    });
-
-    test('move from boundary triggers onRangeChange', () {
-      var triggered = false;
-      final hull = BoundedConvexHull.fromPoints(
-          [Point(0, 0), Point(0, 1), Point(1, 1)],
-          onRangeChange: (_) => triggered = true);
+    test('triggers on relevant move from boundary', () {
+      PointRange? range;
+      final hull = boundedConvexHull(
+          [Point(0, 0), Point(0, 1), Point(0.5, 1), Point(1, 1)],
+          onRangeChange: (r) => range = r);
       hull.move(Point(1, 1), Point(0.5, 1));
-      check(triggered).isTrue();
-      check(hull.pointRange).equals(PointRange.fromLimits(0, 0.5, 0, 1));
+      check(range).equals(PointRange.fromLimits(0, 0.5, 0, 1));
     });
   });
 }

@@ -4,13 +4,54 @@ import 'package:convex_hull/convex_hull.dart';
 import 'circular_linked_list_entry.dart';
 import 'point.dart';
 
+typedef Entry = UnmodifiableCircularLinkedListEntryView<Point>;
+
+sealed class HullEvent {
+  static const cleared = HullCleared._();
+}
+
+class EntryAdded implements HullEvent {
+  final Entry entry;
+  const EntryAdded(this.entry);
+}
+
+class EntryRemoved implements HullEvent {
+  final Point point;
+  final Entry? previous; // previous entry prior to removal
+  const EntryRemoved(this.point, this.previous);
+}
+
+class HullCleared implements HullEvent {
+  const HullCleared._();
+}
+
+class HullInitialized implements HullEvent {
+  final Entry? first;
+  const HullInitialized(this.first);
+}
+
+typedef HullEventCallback = void Function(HullEvent event);
+
+HullEventCallback hullEventCallback({
+  void Function(Entry? first)? onInitialized,
+  void Function(Entry entry)? onAdded,
+  void Function(Point point, Entry? previous)? onRemoved,
+  void Function()? onCleared,
+}) =>
+    (event) => switch (event) {
+          HullCleared _ => onCleared?.call(),
+          HullInitialized init => onInitialized?.call(init.first),
+          EntryAdded added => onAdded?.call(added.entry),
+          EntryRemoved removed =>
+            onRemoved?.call(removed.point, removed.previous),
+        };
+
 class _Edge {
-  final CircularLinkedListEntry<Point> start;
-  CircularLinkedListEntry<Point> get end => start.next;
+  final _MutableEntry start;
+  _MutableEntry get end => start.next;
 
   const _Edge.from(this.start);
-  factory _Edge.to(CircularLinkedListEntry<Point> end) =>
-      _Edge.from(end.previous);
+  factory _Edge.to(_MutableEntry end) => _Edge.from(end.previous);
 
   @override
   String toString() => 'Edge(${start.value} -> ${end.value})';
@@ -45,6 +86,8 @@ class _Edge {
   int get hashCode => start.hashCode;
 }
 
+typedef _MutableEntry = CircularLinkedListEntry<Point>;
+
 enum ComparedState {
   colinearBefore, // point is on the line, before the start of the segment
   colinearBetween, // point is on the line, between the start and end
@@ -53,40 +96,40 @@ enum ComparedState {
   rightOf; // point is right of / outside
 }
 
-int _compareEntries(
-    CircularLinkedListEntry<Point> a, CircularLinkedListEntry<Point> b) {
+int _compareEntries(_MutableEntry a, _MutableEntry b) {
   final xCompare = a.value.x.compareTo(b.value.x);
   return xCompare == 0 ? a.value.y.compareTo(b.value.y) : xCompare;
 }
 
 class ConvexHull {
-  late final Map<Point, CircularLinkedListEntry<Point>> _entries;
-  CircularLinkedListEntry<Point>? _first;
-  UnmodifiableCircularLinkedListEntryView<Point>? get firstOrNull => _first;
-  UnmodifiableCircularLinkedListEntryView<Point> get first => firstOrNull!;
+  final HullEventCallback? onHullEvent;
+  late final Map<Point, _MutableEntry> _entries;
+  _MutableEntry? _first;
+  Entry? get firstOrNull => _first;
+  Entry get first => firstOrNull!;
 
   /// An unmodifiable view of the unmodifiable list entries, keyed by value.
-  UnmodifiableMapView<Point, UnmodifiableCircularLinkedListEntryView<Point>>
-      get linkedVertexMap => UnmodifiableMapView(_entries);
+  UnmodifiableMapView<Point, Entry> get linkedVertexMap =>
+      UnmodifiableMapView(_entries);
 
-  ConvexHull(Iterable<Point> points) {
+  ConvexHull(Iterable<Point> points, {this.onHullEvent}) {
     if (points.isEmpty) {
       _entries = {};
     } else {
       points = convexHull(points, x: (p) => p.x, y: (p) => p.y);
       _first = CircularLinkedListEntry.fromValues(points);
       _entries =
-          Map.fromEntries(_first!.entries.map((e) => MapEntry(e.value, e)));
+          Map.fromEntries(_first!.cycle.map((e) => MapEntry(e.value, e)));
     }
+    onHullEvent?.call(HullInitialized(firstOrNull));
   }
 
-  Iterable<_Edge> get _edges => _first?.entries.map(_Edge.from) ?? const [];
+  Iterable<_Edge> get _edges => _first?.cycle.map(_Edge.from) ?? const [];
 
   Iterable<Point> get vertices => linkedVertices.map((e) => e.value);
 
   /// The vertices of the convex hull in counter-clockwise order
-  Iterable<UnmodifiableCircularLinkedListEntryView<Point>> get linkedVertices =>
-      _first?.entries ?? const [];
+  Iterable<Entry> get linkedVertices => _first?.cycle ?? const [];
 
   /// Returns `true` if the point is a vertex of the hull.
   bool isVertex(Point point) => _entries.containsKey(point);
@@ -105,13 +148,13 @@ class ConvexHull {
   void clear() {
     _entries.clear();
     _first = null;
+    onHullEvent?.call(HullEvent.cleared);
   }
 
-  void _split(
-      CircularLinkedListEntry<Point> a, CircularLinkedListEntry<Point> b) {
+  void _split(_MutableEntry a, _MutableEntry b) {
     final split = CircularLinkedListEntry.split(a, b);
     if (split != null) {
-      for (final e in split.entries) {
+      for (final e in split.cycle) {
         _entries.remove(e.value);
         if (e == _first) {
           _first = null;
@@ -122,8 +165,7 @@ class ConvexHull {
   }
 
   /// Add an entry, updating [_entries] and possibly [_first]
-  CircularLinkedListEntry<Point> _addEntry(
-      CircularLinkedListEntry<Point> entry) {
+  _MutableEntry _addEntry(_MutableEntry entry) {
     final point = entry.value;
     _entries[point] = entry;
     // maybe replace first
@@ -131,29 +173,41 @@ class ConvexHull {
     if (first == null || _compareEntries(entry, first) < 0) {
       _first = entry;
     }
+    onHullEvent?.call(EntryAdded(entry));
     return entry;
   }
 
-  /// Remove an entry, updating [_entries] and possibly [_first], and unlinks
-  /// it from neighboring entries.
-  void _removeEntry(CircularLinkedListEntry<Point> entry) {
+  _MutableEntry? _removeEntry(Entry entry) {
     final removed = _entries.remove(entry.value);
-    assert(removed == entry);
-    if (entry == _first) {
-      if (entry.isIsolated) {
+    if (removed == null) {
+      throw ArgumentError('entry must be in the hull');
+    }
+    if (removed != entry) {
+      throw ArgumentError(
+          'entry.point found in the hull but belongs to a different entry');
+    }
+    final previous = removed.isIsolated ? null : removed.previous;
+    if (removed == _first) {
+      if (removed.isIsolated) {
         _first = null;
       } else {
-        _first = _compareEntries(entry.previous, entry.next) < 0
-            ? entry.previous
-            : entry.next;
+        _first = _compareEntries(removed.previous, removed.next) < 0
+            ? removed.previous
+            : removed.next;
       }
     }
-    entry.unlink();
+    removed.unlink();
+    onHullEvent?.call(EntryRemoved(removed.value, previous));
+    return previous;
   }
 
-  CircularLinkedListEntry<Point>? _addNear(Point point, _Edge nearby) {
+  void removeEntry(Entry entry) {
+    _removeEntry(entry);
+  }
+
+  _MutableEntry? _addNear(Point point, _Edge nearby) {
     var startEdge = nearby.next;
-    CircularLinkedListEntry<Point>? newPrevious;
+    _MutableEntry? newPrevious;
     // go backwards until point is left of the edge
     switch (nearby.comparedTo(point)) {
       case ComparedState.colinearBetween:
@@ -203,7 +257,7 @@ class ConvexHull {
           }
         }
     }
-    CircularLinkedListEntry<Point>? newNext;
+    _MutableEntry? newNext;
     var edge = startEdge;
     while (newNext == null) {
       // search forward until first leftOf
@@ -232,7 +286,7 @@ class ConvexHull {
   ///
   /// Returns `true` if the point is a vertex of the new hull, or `false` if
   /// the point was already inside (in which case the hull is unchanged).
-  UnmodifiableCircularLinkedListEntryView<Point>? add(Point point) {
+  Entry? add(Point point) {
     // based on slide 1
     // https://www.cs.jhu.edu/~misha/Spring16/07.pdf
 
@@ -264,25 +318,27 @@ class ConvexHull {
     if (entry == null) {
       return false;
     }
-    _removeEntry(entry);
+    removeEntry(entry);
     return true;
   }
 
   /// Move a point from [original] to [moved].
   ///
   /// Returns `true` if [moved] is a vertex of the new hull.
-  UnmodifiableCircularLinkedListEntryView<Point>? move(
-      Point original, Point moved) {
+  Entry? move(Point original, Point moved) {
     final entry = _entries[original];
     if (entry == null) {
       throw ArgumentError('original must be in the hull');
     }
+    return moveEntry(entry, moved);
+  }
+
+  Entry? moveEntry(Entry entry, Point moved) {
     if (entry.isIsolated) {
-      _removeEntry(entry);
+      removeEntry(entry);
       return _addEntry(CircularLinkedListEntry.isolated(moved));
     }
-    final previous = entry.previous;
-    _removeEntry(entry);
+    final previous = _removeEntry(entry)!;
     return _addNear(moved, _Edge.from(previous));
   }
 }

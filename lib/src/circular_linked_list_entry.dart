@@ -9,6 +9,14 @@ abstract interface class UnmodifiableCircularLinkedListEntryView<T> {
 
   /// Returns `true` iff `this` is a trivial cycle.
   bool get isIsolated;
+
+  /// Cycle through all entries starting at this and going next.
+  Iterable<UnmodifiableCircularLinkedListEntryView<T>> get cycle;
+
+  /// Cycle through all entries starting at previous until this going backwards.
+  ///
+  /// This is the same as [cycle].toList().reversed.
+  Iterable<UnmodifiableCircularLinkedListEntryView<T>> get cycleReversed;
 }
 
 class CircularLinkedListEntry<T>
@@ -55,7 +63,7 @@ class CircularLinkedListEntry<T>
   CircularLinkedListEntry<T> copy() {
     final first = CircularLinkedListEntry._(value);
     var current = first;
-    for (final e in first.entries.skip(1)) {
+    for (final e in first.cycle.skip(1)) {
       final next = CircularLinkedListEntry._(e.value);
       current._next = next;
       next._previous = current;
@@ -132,7 +140,8 @@ class CircularLinkedListEntry<T>
   bool get isIsolated => _next == null;
 
   /// Iterates over all reachable entries using [next], starting at this.
-  Iterable<CircularLinkedListEntry<T>> get entries sync* {
+  @override
+  Iterable<CircularLinkedListEntry<T>> get cycle sync* {
     yield this;
     var current = this.next;
     while (current != this) {
@@ -141,8 +150,9 @@ class CircularLinkedListEntry<T>
     }
   }
 
-  /// Same as [entries].toList().reversed, i.e. yields `this` last.
-  Iterable<CircularLinkedListEntry<T>> get reversedEntries sync* {
+  /// Same as [cycle].toList().reversed, i.e. yields `this` last.
+  @override
+  Iterable<CircularLinkedListEntry<T>> get cycleReversed sync* {
     var current = previous;
     while (current != this) {
       yield current;
@@ -150,11 +160,4 @@ class CircularLinkedListEntry<T>
     }
     yield this;
   }
-
-  /// Get all entries from this to [other], including this but not [other].
-  ///
-  /// Will not do more than a full cycle if [other] is not found.
-  Iterable<CircularLinkedListEntry<T>> entriesTo(
-          CircularLinkedListEntry<T> other) =>
-      entries.takeWhile((e) => e != other);
 }

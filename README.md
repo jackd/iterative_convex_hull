@@ -22,7 +22,7 @@ Add the following to your `pubspec.yaml`:
 ```.yaml
 dependencies:
     iterative_convex_hull:
-        git: https://github.com/jackd/iterative-convex-hull.git
+        git: https://github.com/jackd/iterative_convex_hull.git
 ```
 
 ## Usage
