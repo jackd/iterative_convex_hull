@@ -23,6 +23,8 @@ sealed class ValueRange {
 
   static const empty = EmptyValueRange._();
 
+  static const full = FullValueRange._();
+
   bool contains(double value);
 
   ValueRange union(ValueRange other);
@@ -156,4 +158,32 @@ final class EmptyValueRange implements ValueRange {
 
   @override
   String toString() => 'EmptyValueRange';
+}
+
+final class FullValueRange implements ValueRange {
+  const FullValueRange._();
+
+  @override
+  bool contains(double value) => value.isFinite;
+
+  @override
+  ValueRange union(ValueRange other) => this;
+
+  @override
+  ValueRange add(double value) => this;
+
+  @override
+  double get min => double.negativeInfinity;
+
+  @override
+  double get max => double.infinity;
+
+  @override
+  double get size => double.infinity;
+
+  @override
+  double normalize(double value) => value.isFinite ? 0.0 : double.nan;
+
+  @override
+  String toString() => 'FullValueRange';
 }
